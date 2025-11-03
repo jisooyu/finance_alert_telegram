@@ -4,7 +4,7 @@ dash
 plotly
 flask
 gunicorn
-dash-boostrap-components 
+dash-bootstrap-components 
 python-telegram-bot==20.7
 python-dotenv
 asyncio
