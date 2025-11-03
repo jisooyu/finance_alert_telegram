@@ -1,6 +1,11 @@
-dash
 pandas
 pandas_datareader
-python-telegram-bot
-python-dotenv
+dash
+plotly
+flask
 gunicorn
+dash_boostrap_components 
+python-telegram-bot==20.7
+python-dotenv
+asyncio
+datetime
