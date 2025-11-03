@@ -1,0 +1,6 @@
+dash
+pandas
+pandas_datareader
+python-telegram-bot
+python-dotenv
+gunicorn
