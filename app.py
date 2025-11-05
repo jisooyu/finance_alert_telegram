@@ -44,7 +44,7 @@ def load_data():
 # ============================================================
 app.layout = dbc.Container([
     html.H2("📊 US Credit Market Dashboard"),
-    html.P("Monitors Consumer Credit, HY Spread, and Financial Conditions (NFCI)."),
+    html.P("Monitors Consumer Credit(TOTALSLAR), HY Spread(BAMLH0A0HYM2), and Financial Conditions (NFCI)."),
 
     html.Div(id="data_table"),
     html.Br(),
