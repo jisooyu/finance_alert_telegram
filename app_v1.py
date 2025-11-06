@@ -1,19 +1,18 @@
 """
-app.py — U.S. Credit Market Dashboard (Final)
----------------------------------------------
-Features:
-- Fetches TOTALSLAR, BAMLH0A0HYM2, and NFCI from FRED
-- Normalizes to z-scores for clear comparison
-- Displays 3-axis chart + summary table of latest readings
-- Auto-refreshes weekly
-- Telegram summary alert button
+app.py — Credit Market Dashboard (Fixed)
+----------------------------------------
+Visualizes:
+- Consumer Credit Growth (TOTALSLAR)
+- HY Spread (BAMLH0A0HYM2)
+- NFCI Index
+Auto-refreshes weekly and supports Telegram alerts.
 """
 
 import asyncio
 from datetime import datetime
 import pandas as pd
 import plotly.graph_objects as go
-from dash import Dash, html, dcc, dash_table, Output, Input
+from dash import Dash, html, dcc, Output, Input
 import dash_bootstrap_components as dbc
 
 from credit_monitor_extended import (
@@ -30,10 +29,10 @@ app = Dash(__name__, external_stylesheets=[dbc.themes.SANDSTONE])
 app.title = "Credit Market Dashboard"
 
 # ============================================================
-# 2️⃣ Data loader
+# 2️⃣ Data Loader
 # ============================================================
 def load_data():
-    """Fetch, merge, and align all indicators."""
+    """Fetch and merge all indicators with frequency alignment."""
     try:
         cc = fetch_consumer_credit(cfg.START_DATE)
         hy = fetch_hy_spread(cfg.START_DATE)
@@ -44,88 +43,69 @@ def load_data():
         hy = hy.rename(columns={"hy_oas_bps": "HY Spread (bps)"})
         nf = nf.rename(columns={"nfci": "NFCI Index"})
 
-        # Merge and forward-fill lower-frequency data
+        # Merge using outer join on DATE
         df = cc[["Consumer Credit Growth (%)"]].join(
             hy[["HY Spread (bps)"]], how="outer"
         ).join(nf[["NFCI Index"]], how="outer")
+
+        # Sort & forward-fill lower-frequency data
         df = df.sort_index().ffill()
 
-        # Limit to last two years for clarity
+        # Optional: limit to last 2 years for visibility
         df = df[df.index >= (df.index.max() - pd.DateOffset(years=2))]
 
-        print(f"[DEBUG] Loaded data tail:\n{df.tail()}")
+        print(f"[DEBUG] Loaded merged data tail:\n{df.tail()}")
         return df
+
     except Exception as e:
         print(f"[ERROR] Data load failed: {e}")
         return pd.DataFrame()
 
-# ============================================================
-# 3️⃣ Chart builder (Z-score normalization)
-# ============================================================
-def make_chart(df: pd.DataFrame):
-    if df.empty:
-        fig = go.Figure()
-        fig.add_annotation(
-            text="⚠️ No data available from FRED.",
-            xref="paper", yref="paper", showarrow=False,
-            font=dict(size=16, color="red"), x=0.5, y=0.5
-        )
-        return fig
 
-    # Normalize for visual comparability
-    df_norm = (df - df.mean()) / df.std()
-
+# ============================================================
+# 3️⃣ Chart builder
+# ============================================================
+def make_chart(df):
     fig = go.Figure()
-    colors = {
-        "Consumer Credit Growth (%)": "blue",
-        "HY Spread (bps)": "red",
-        "NFCI Index": "green"
-    }
 
-    for col, color in colors.items():
-        fig.add_trace(go.Scatter(
-            x=df_norm.index, y=df_norm[col],
-            mode="lines", name=col,
-            line=dict(color=color, width=2,
-                      dash="dash" if col == "NFCI Index" else "solid")
-        ))
+    fig.add_trace(go.Scatter(
+        x=df.index, y=df["Consumer Credit Growth (%)"],
+        mode="lines", name="Consumer Credit Growth (%)",
+        line=dict(color="blue", width=2), yaxis="y"
+    ))
+    fig.add_trace(go.Scatter(
+        x=df.index, y=df["HY Spread (bps)"],
+        mode="lines", name="HY Spread (bps)",
+        line=dict(color="red", width=2), yaxis="y2"
+    ))
+    fig.add_trace(go.Scatter(
+        x=df.index, y=df["NFCI Index"],
+        mode="lines", name="NFCI Index",
+        line=dict(color="green", width=2, dash="dash"), yaxis="y3"
+    ))
 
     fig.update_layout(
-        title="Normalized U.S. Credit Market Indicators (Z-Scores)",
-        xaxis_title="Date",
-        yaxis_title="Standardized Value (Z-Score)",
-        template="plotly_white", height=600,
-        legend=dict(orientation="h", y=-0.25)
+        title="U.S. Credit Market Indicators (Multiple Scales)",
+        xaxis=dict(title="Date"),
+        yaxis=dict(title=dict(text="Consumer Credit Growth (%)",
+                              font=dict(color="blue")),
+                   tickfont=dict(color="blue")),
+        yaxis2=dict(title=dict(text="HY Spread (bps)",
+                               font=dict(color="red")),
+                    tickfont=dict(color="red"),
+                    overlaying="y", side="right", position=0.9),
+        yaxis3=dict(title=dict(text="NFCI Index",
+                               font=dict(color="green")),
+                    tickfont=dict(color="green"),
+                    overlaying="y", side="right", position=1.0),
+        legend=dict(orientation="h", y=-0.25),
+        template="plotly_white", height=600
     )
     return fig
 
-# ============================================================
-# 4️⃣ Summary Table Builder
-# ============================================================
-def make_summary_table(df: pd.DataFrame):
-    """Return DataTable showing the 3 latest values for each series."""
-    latest_dates = []
-    for col in df.columns:
-        last_rows = df[[col]].dropna().tail(3)
-        for idx, val in last_rows.iterrows():
-            latest_dates.append({
-                "Indicator": col,
-                "Date": idx.strftime("%Y-%m-%d"),
-                "Value": round(val[col], 2)
-            })
-    table_df = pd.DataFrame(latest_dates)
-
-    return dash_table.DataTable(
-        data=table_df.to_dict("records"),
-        columns=[{"name": i, "id": i} for i in table_df.columns],
-        style_table={"overflowX": "auto"},
-        style_cell={"textAlign": "center", "padding": "6px"},
-        style_header={"backgroundColor": "#f8f9fa", "fontWeight": "bold"},
-        page_size=9
-    )
 
 # ============================================================
-# 5️⃣ Layout
+# 4️⃣ Layout
 # ============================================================
 app.layout = dbc.Container([
     html.H2("📊 U.S. Credit Market Dashboard"),
@@ -134,34 +114,27 @@ app.layout = dbc.Container([
     dcc.Graph(id="credit_chart", style={"height": "600px"}),
     html.Br(),
 
-    html.H5("Latest Readings"),
-    html.Div(id="summary_table"),
-    html.Br(),
-
     dbc.Button("🚀 Send Telegram Summary", id="send_btn", color="success", className="me-2"),
     html.Span(id="status", className="text-info"),
     html.Br(),
 
     dcc.Interval(
         id="weekly_refresh",
-        interval=7 * 24 * 3600 * 1000,  # auto-refresh weekly
+        interval=7 * 24 * 3600 * 1000,   # every 7 days
         n_intervals=0
     )
 ], fluid=True, className="p-4")
 
 # ============================================================
-# 6️⃣ Callbacks
+# 5️⃣ Callbacks
 # ============================================================
 @app.callback(
     Output("credit_chart", "figure"),
-    Output("summary_table", "children"),
     Input("weekly_refresh", "n_intervals"),
 )
-def update_dashboard(n_intervals):
+def update_chart(n_intervals):
     df = load_data()
-    fig = make_chart(df)
-    table = make_summary_table(df)
-    return fig, table
+    return make_chart(df)
 
 
 @app.callback(
@@ -184,7 +157,7 @@ def send_summary(n_clicks):
     return f"✅ Telegram summary sent at {datetime.now().strftime('%H:%M:%S')}"
 
 # ============================================================
-# 7️⃣ Run
+# 6️⃣ Run
 # ============================================================
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=8050, debug=True)
+    app.run(host="0.0.0.0", port=8050, debug=True)
