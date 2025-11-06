@@ -62,16 +62,25 @@ def load_data():
 # ============================================================
 # 3️⃣ Chart builder (Z-score normalization)
 # ============================================================
-def make_chart(df):
+def make_chart(df: pd.DataFrame):
     if df.empty:
-        ...
-    # Normalize each series
+        fig = go.Figure()
+        fig.add_annotation(
+            text="⚠️ No data available from FRED.",
+            xref="paper", yref="paper", showarrow=False,
+            font=dict(size=16, color="red"), x=0.5, y=0.5
+        )
+        return fig
+
+    # Normalize for visual comparability
     df_norm = (df - df.mean()) / df.std()
 
     fig = go.Figure()
-    colors = {"Consumer Credit Growth (%)": "blue",
-              "HY Spread (bps)": "red",
-              "NFCI Index": "green"}
+    colors = {
+        "Consumer Credit Growth (%)": "blue",
+        "HY Spread (bps)": "red",
+        "NFCI Index": "green"
+    }
 
     for col, color in colors.items():
         fig.add_trace(go.Scatter(
