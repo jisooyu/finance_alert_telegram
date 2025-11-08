@@ -63,40 +63,30 @@ def load_data():
 # 3️⃣ Chart builder (Z-score normalization)
 # ============================================================
 def make_chart(df):
-    fig = go.Figure()
+    if df.empty:
+        ...
+    # Normalize each series
+    df_norm = (df - df.mean()) / df.std()
 
-    fig.add_trace(go.Scatter(
-        x=df.index, y=df["Consumer Credit Growth (%)"],
-        mode="lines", name="Consumer Credit Growth (%)",
-        line=dict(color="blue", width=2), yaxis="y"
-    ))
-    fig.add_trace(go.Scatter(
-        x=df.index, y=df["HY Spread (bps)"],
-        mode="lines", name="HY Spread (bps)",
-        line=dict(color="red", width=2), yaxis="y2"
-    ))
-    fig.add_trace(go.Scatter(
-        x=df.index, y=df["NFCI Index"],
-        mode="lines", name="NFCI Index",
-        line=dict(color="green", width=2, dash="dash"), yaxis="y3"
-    ))
+    fig = go.Figure()
+    colors = {"Consumer Credit Growth (%)": "blue",
+              "HY Spread (bps)": "red",
+              "NFCI Index": "green"}
+
+    for col, color in colors.items():
+        fig.add_trace(go.Scatter(
+            x=df_norm.index, y=df_norm[col],
+            mode="lines", name=col,
+            line=dict(color=color, width=2,
+                      dash="dash" if col == "NFCI Index" else "solid")
+        ))
 
     fig.update_layout(
-        title="U.S. Credit Market Indicators (Multiple Scales)",
-        xaxis=dict(title="Date"),
-        yaxis=dict(title=dict(text="Consumer Credit Growth (%)",
-                              font=dict(color="blue")),
-                   tickfont=dict(color="blue")),
-        yaxis2=dict(title=dict(text="HY Spread (bps)",
-                               font=dict(color="red")),
-                    tickfont=dict(color="red"),
-                    overlaying="y", side="right", position=0.9),
-        yaxis3=dict(title=dict(text="NFCI Index",
-                               font=dict(color="green")),
-                    tickfont=dict(color="green"),
-                    overlaying="y", side="right", position=1.0),
-        legend=dict(orientation="h", y=-0.25),
-        template="plotly_white", height=600
+        title="Normalized U.S. Credit Market Indicators (Z-Scores)",
+        xaxis_title="Date",
+        yaxis_title="Standardized Value (Z-Score)",
+        template="plotly_white", height=600,
+        legend=dict(orientation="h", y=-0.25)
     )
     return fig
 

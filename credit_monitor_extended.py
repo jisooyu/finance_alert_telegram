@@ -48,6 +48,16 @@ class Config:
         self.STALE_DAYS = 90
         self.START_DATE = "2010-01-01"
 
+        # the series code and threshold
+        self.FRED_SERIES = {
+            "consumer_credit": "TOTALSLAR",
+            "hy_spread": "BAMLH0A0HYM2",
+            "nfci": "NFCI",
+            "consumer_sentiment": "UMCSENT"
+        }
+        # Example threshold
+        self.SENTIMENT_THRESHOLD = 60.0   # e.g., if sentiment drops below 60
+
 
 # ============================================================
 # 2️⃣ Data Fetchers
@@ -86,6 +96,11 @@ def fetch_nfci(start='2000-01-01', end=None):
     df["latest_date"] = df.index
     return df
 
+def fetch_sentiment(start='2000-01-01', end=None):
+    df = FredFetcher("UMCSENT").fetch(start, end)
+    df.columns = ['consumer_sentiment']
+    df["latest_date"] = df.index
+    return df
 
 # ============================================================
 # 3️⃣ Telegram Notifier
@@ -179,6 +194,16 @@ class CreditMonitor:
         if nfci_latest_value > self.cfg.NFCI_THRESHOLD:
             await self.notifier.send(f"📈 NFCI turned positive ({nfci_latest_value:.2f}) — tightening conditions.")
 
+        # ---------- Consumer Sentiment ----------
+        sent = fetch_sentiment(self.cfg.START_DATE)
+        sent_latest_date = sent.index.max().date()
+        sent_latest_value = sent.iloc[-1]['consumer_sentiment']
+        sent_new = self._compare_new_data(sent, "consumer_sentiment.txt")
+
+        if sent_new:
+            await self.notifier.send(f"🆕 New Consumer Sentiment data ({sent_latest_date}): {sent_latest_value:.2f}")
+        if sent_latest_value < self.cfg.SENTIMENT_THRESHOLD:
+            await self.notifier.send(f"⚠️ Consumer Sentiment Warning: {sent_latest_value:.2f} (<{self.cfg.SENTIMENT_THRESHOLD})")
 
 # ============================================================
 # 5️⃣ Entry Point

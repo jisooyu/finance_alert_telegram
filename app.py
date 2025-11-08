@@ -18,7 +18,7 @@ import dash_bootstrap_components as dbc
 
 from credit_monitor_extended import (
     Config, TelegramNotifier,
-    fetch_consumer_credit, fetch_hy_spread, fetch_nfci
+    fetch_consumer_credit, fetch_hy_spread, fetch_nfci, fetch_sentiment
 )
 
 # ============================================================
@@ -33,52 +33,59 @@ app.title = "Credit Market Dashboard"
 # 2️⃣ Data loader
 # ============================================================
 def load_data():
-    """Fetch, merge, and align all indicators."""
-    try:
-        cc = fetch_consumer_credit(cfg.START_DATE)
-        hy = fetch_hy_spread(cfg.START_DATE)
-        nf = fetch_nfci(cfg.START_DATE)
+    cc = fetch_consumer_credit(cfg.START_DATE)
+    hy = fetch_hy_spread(cfg.START_DATE)
+    nf = fetch_nfci(cfg.START_DATE)
+    sent = fetch_sentiment(cfg.START_DATE)
 
-        # Rename key columns
-        cc = cc.rename(columns={"pct_change_consumer_credit": "Consumer Credit Growth (%)"})
-        hy = hy.rename(columns={"hy_oas_bps": "HY Spread (bps)"})
-        nf = nf.rename(columns={"nfci": "NFCI Index"})
+    cc = cc.rename(columns={"pct_change_consumer_credit": "Consumer Credit Growth (%)"})
+    hy = hy.rename(columns={"hy_oas_bps": "HY Spread (bps)"})
+    nf = nf.rename(columns={"nfci": "NFCI Index"})
+    sent = sent.rename(columns={"consumer_sentiment": "Consumer Sentiment Index"})
+    
+    df = cc[["Consumer Credit Growth (%)"]].join(
+        hy[["HY Spread (bps)"]], how="outer"
+    ).join(nf[["NFCI Index"]], how="outer").join(
+        sent[["Consumer Sentiment Index"]], how="outer"
+    )
+    df = df.sort_index().ffill()
+    df = df[df.index >= (df.index.max() - pd.DateOffset(years=2))]
+    return df
 
-        # Merge and forward-fill lower-frequency data
-        df = cc[["Consumer Credit Growth (%)"]].join(
-            hy[["HY Spread (bps)"]], how="outer"
-        ).join(nf[["NFCI Index"]], how="outer")
-        df = df.sort_index().ffill()
 
-        # Limit to last two years for clarity
-        df = df[df.index >= (df.index.max() - pd.DateOffset(years=2))]
-
-        print(f"[DEBUG] Loaded data tail:\n{df.tail()}")
-        return df
-    except Exception as e:
-        print(f"[ERROR] Data load failed: {e}")
-        return pd.DataFrame()
-
+# ============================================================
+# 3️⃣ Chart builder (Z-score normalization)
+# ============================================================
 # ============================================================
 # 3️⃣ Chart builder (Z-score normalization)
 # ============================================================
 def make_chart(df):
     if df.empty:
-        ...
-    # Normalize each series
+        fig = go.Figure()
+        fig.add_annotation(
+            text="⚠️ No data available from FRED.",
+            xref="paper", yref="paper", showarrow=False,
+            font=dict(size=16, color="red"), x=0.5, y=0.5
+        )
+        return fig
+
+    # Normalize each series to Z-scores for visibility
     df_norm = (df - df.mean()) / df.std()
 
     fig = go.Figure()
-    colors = {"Consumer Credit Growth (%)": "blue",
-              "HY Spread (bps)": "red",
-              "NFCI Index": "green"}
+    colors = {
+        "Consumer Credit Growth (%)": "blue",
+        "HY Spread (bps)": "red",
+        "NFCI Index": "green",
+        "Consumer Sentiment Index": "purple"  # 🟣 Sentiment
+    }
 
     for col, color in colors.items():
         fig.add_trace(go.Scatter(
             x=df_norm.index, y=df_norm[col],
             mode="lines", name=col,
             line=dict(color=color, width=2,
-                      dash="dash" if col == "NFCI Index" else "solid")
+                      dash="dash" if col in ["NFCI Index", "Consumer Sentiment Index"] else "solid")  # 🟣 dashed sentiment line
         ))
 
     fig.update_layout(
@@ -89,6 +96,7 @@ def make_chart(df):
         legend=dict(orientation="h", y=-0.25)
     )
     return fig
+
 
 # ============================================================
 # 4️⃣ Summary Table Builder
@@ -112,15 +120,17 @@ def make_summary_table(df: pd.DataFrame):
         style_table={"overflowX": "auto"},
         style_cell={"textAlign": "center", "padding": "6px"},
         style_header={"backgroundColor": "#f8f9fa", "fontWeight": "bold"},
-        page_size=9
+        page_size=12  # 🟣 slightly bigger to fit 4 indicators × 3 rows
     )
+
 
 # ============================================================
 # 5️⃣ Layout
 # ============================================================
 app.layout = dbc.Container([
     html.H2("📊 U.S. Credit Market Dashboard"),
-    html.P("Tracking Consumer Credit (TOTALSLAR), HY Spread (BAMLH0A0HYM2), and Financial Conditions (NFCI)."),
+    html.P("Tracking Consumer Credit (TOTALSLAR), HY Spread (BAMLH0A0HYM2), "
+           "Financial Conditions (NFCI), and University of Michigan Consumer Sentiment (UMCSENT)."),  # 🟣 Sentiment in title
 
     dcc.Graph(id="credit_chart", style={"height": "600px"}),
     html.Br(),
@@ -139,6 +149,7 @@ app.layout = dbc.Container([
         n_intervals=0
     )
 ], fluid=True, className="p-4")
+
 
 # ============================================================
 # 6️⃣ Callbacks
@@ -169,10 +180,12 @@ def send_summary(n_clicks):
         f"📊 <b>Credit Dashboard Update ({datetime.now():%Y-%m-%d %H:%M})</b>\n"
         f"• Consumer Credit: {latest['Consumer Credit Growth (%)']:.2f}%\n"
         f"• HY Spread: {latest['HY Spread (bps)']:.0f} bps\n"
-        f"• NFCI: {latest['NFCI Index']:.2f}"
+        f"• NFCI: {latest['NFCI Index']:.2f}\n"
+        f"• Sentiment: {latest['Consumer Sentiment Index']:.2f}"  # 🟣 Sentiment
     )
     asyncio.run(notifier.send(msg))
     return f"✅ Telegram summary sent at {datetime.now().strftime('%H:%M:%S')}"
+
 
 # ============================================================
 # 7️⃣ Run
