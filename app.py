@@ -236,16 +236,21 @@ app.layout = dbc.Container([
 
     # Auto-refresh
 
-    dcc.Interval(
-        id="resize_check",
-        interval=2000,  # every 2 seconds to detect resize/orientation change
-        n_intervals=0
-    ),
+    # dcc.Interval(
+    #     id="resize_check",
+    #     interval=2000,  # every 2 seconds to detect resize/orientation change
+    #     n_intervals=0
+    # ),
     # dcc.Interval(
     #     id="weekly_refresh",
     #     interval=7 * 24 * 3600 * 1000,
     #     n_intervals=0
     # )
+    dcc.Interval(
+        id="hourly_refresh",
+        interval=3600 * 1000,  # auto-refresh every 1 hour
+        n_intervals=0
+    )
 
 ], fluid=True, className="p-4")
 
