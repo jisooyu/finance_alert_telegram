@@ -3,8 +3,8 @@ app.py — U.S. Credit Market Dashboard (Final)
 ---------------------------------------------
 Features:
 - Fetches TOTALSLAR, BAMLH0A0HYM2, NFCI, UMCSENT, and VIXCLS from FRED
-- Normalizes to z-scores for visual comparability
-- Displays chart, threshold summary, and latest readings
+- Normalizes to z-scores for clear comparison
+- Displays chart + summary table
 - Auto-refreshes weekly
 - Telegram summary alert button
 """
@@ -27,17 +27,11 @@ from credit_monitor_extended import (
 # ============================================================
 cfg = Config()
 notifier = TelegramNotifier(cfg.TELEGRAM_TOKEN, cfg.CHAT_ID)
-app = Dash(
-    __name__,
-    external_stylesheets=[dbc.themes.SANDSTONE],
-    meta_tags=[
-        {"name": "viewport", "content": "width=device-width, initial-scale=1, maximum-scale=1"}
-    ]
-)
+app = Dash(__name__, external_stylesheets=[dbc.themes.SANDSTONE])
 app.title = "U.S. Credit Market Dashboard"
 
 # ============================================================
-# 2️⃣ Data Loader
+# 2️⃣ Data loader
 # ============================================================
 def load_data():
     cc = fetch_consumer_credit(cfg.START_DATE)
@@ -50,7 +44,7 @@ def load_data():
     hy = hy.rename(columns={"hy_oas_bps": "HY Spread (bps)"})
     nf = nf.rename(columns={"nfci": "NFCI Index"})
     sent = sent.rename(columns={"consumer_sentiment": "Consumer Sentiment Index"})
-    vix = vix.rename(columns={"vix": "VIX Index"})
+    vix = vix.rename(columns={"vix": "VIX Index"})  # 🟣 added
 
     df = cc[["Consumer Credit Growth (%)"]].join(
         hy[["HY Spread (bps)"]], how="outer"
@@ -64,7 +58,7 @@ def load_data():
 
 
 # ============================================================
-# 3️⃣ Chart Builder (Z-Score Normalization)
+# 3️⃣ Chart builder (Z-score normalization)
 # ============================================================
 def make_chart(df):
     if df.empty:
@@ -76,107 +70,37 @@ def make_chart(df):
         )
         return fig
 
-    # --- Keep the 3 key indicators ---
-    df = df[["HY Spread (bps)", "VIX Index", "Consumer Sentiment Index"]].dropna()
-
-    # --- Normalize to Z-scores ---
     df_norm = (df - df.mean()) / df.std()
-
-    # --- Compute z-score thresholds ---
-    thresh_values = {
-        "HY Spread (bps)": (cfg.HY_SPREAD_THRESHOLD - df["HY Spread (bps)"].mean()) / df["HY Spread (bps)"].std(),
-        "VIX Index": (cfg.VIX_THRESHOLD - df["VIX Index"].mean()) / df["VIX Index"].std(),
-        "Consumer Sentiment Index": (cfg.SENTIMENT_THRESHOLD - df["Consumer Sentiment Index"].mean()) / df["Consumer Sentiment Index"].std()
-    }
-
-    # --- Colors and friendly labels ---
-    series_info = {
-        "HY Spread (bps)": {"color": "red", "label": "HY Spread — Risk Premium"},
-        "VIX Index": {"color": "orange", "label": "VIX — Market Volatility"},
-        "Consumer Sentiment Index": {"color": "purple", "label": "Sentiment — Consumer Confidence"}
+    colors = {
+        "Consumer Credit Growth (%)": "blue",
+        "HY Spread (bps)": "red",
+        "NFCI Index": "green",
+        "Consumer Sentiment Index": "purple",
+        "VIX Index": "orange"  # 🟣 added
     }
 
     fig = go.Figure()
-
-    # --- Solid main data lines ---
-    for col, info in series_info.items():
+    for col, color in colors.items():
         fig.add_trace(go.Scatter(
-            x=df_norm.index,
-            y=df_norm[col],
-            mode="lines",
-            name=info["label"],
-            line=dict(color=info["color"], width=2)
+            x=df_norm.index, y=df_norm[col],
+            mode="lines", name=col,
+            line=dict(color=color, width=2,
+                      dash="dash" if col in ["NFCI Index", "Consumer Sentiment Index", "VIX Index"] else "solid")
         ))
 
-    # --- Dashed threshold lines (semi-transparent) ---
-    for col, info in series_info.items():
-        z_thresh = thresh_values[col]
-        fig.add_hline(
-            y=z_thresh,
-            line_dash="dot",
-            line_color=info["color"],
-            opacity=0.6,  # 👈 soft opacity for cleaner visual hierarchy
-            annotation_text=f"{info['label']} threshold (z={z_thresh:.2f})",
-            annotation_position="top right",
-            annotation_font=dict(size=10, color=info["color"])
-        )
-
-    # --- Fixed vertical range ---
-    y_min = df_norm.min().min()
-    fig.update_yaxes(range=[y_min - 1, 8])
-
-    # --- Layout adjustments ---
     fig.update_layout(
-        title="Normalized U.S. Market Stress & Sentiment Indicators (Z-Scores)",
+        title="Normalized U.S. Credit Market Indicators (Z-Scores)",
         xaxis_title="Date",
         yaxis_title="Standardized Value (Z-Score)",
         template="plotly_white",
-        height=650,
-        legend=dict(
-            orientation="h",
-            y=-0.25,
-            font=dict(size=11)
-        )
+        height=600,
+        legend=dict(orientation="h", y=-0.25)
     )
-
     return fig
 
 
 # ============================================================
-# 4️⃣ Threshold Display
-# ============================================================
-def make_threshold_cards(cfg: Config):
-    thresholds = {
-        "Consumer Credit Growth (%)": f"< {cfg.CREDIT_THRESHOLD:.2f}%",
-        "HY Spread (bps)": f"> {cfg.HY_SPREAD_THRESHOLD:.0f} bps",
-        "NFCI Index": f"> {cfg.NFCI_THRESHOLD:.2f}",
-        "Consumer Sentiment Index": f"< {cfg.SENTIMENT_THRESHOLD:.0f}",
-        "VIX Index": f"> {cfg.VIX_THRESHOLD:.0f}"
-    }
-
-    cards = []
-    for k, v in thresholds.items():
-        cards.append(
-            dbc.Card(
-                dbc.CardBody([
-                    html.H6(k, className="card-title"),
-                    html.P(v, className="card-text fw-bold text-danger mb-0")
-                ]),
-                className="text-center shadow-sm",
-                style={"minWidth": "12rem", "margin": "6px", "flex": "1"}
-
-            )
-        )
-
-    return dbc.Row(
-        [dbc.Col(card, width="auto") for card in cards],
-        justify="center",
-        className="mb-4"
-    )
-
-
-# ============================================================
-# 5️⃣ Summary Table Builder
+# 4️⃣ Summary Table
 # ============================================================
 def make_summary_table(df: pd.DataFrame):
     latest_records = []
@@ -193,7 +117,7 @@ def make_summary_table(df: pd.DataFrame):
     return dash_table.DataTable(
         data=table_df.to_dict("records"),
         columns=[{"name": i, "id": i} for i in table_df.columns],
-        style_table={"overflowX": "auto", "width": "100%"},
+        style_table={"overflowX": "auto"},
         style_cell={"textAlign": "center", "padding": "6px"},
         style_header={"backgroundColor": "#f8f9fa", "fontWeight": "bold"},
         page_size=15
@@ -201,38 +125,24 @@ def make_summary_table(df: pd.DataFrame):
 
 
 # ============================================================
-# 6️⃣ Layout
+# 5️⃣ Layout
 # ============================================================
 app.layout = dbc.Container([
     html.H2("📊 U.S. Credit Market Dashboard"),
     html.P("Tracking Consumer Credit (TOTALSLAR), HY Spread (BAMLH0A0HYM2), NFCI, "
-           "Consumer Sentiment (UMCSENT), and VIX (VIXCLS)."),
+           "Consumer Sentiment (UMCSENT), and VIX (VIXCLS)."),  # 🟣 VIX added
 
-    # Chart
-    dcc.Graph(
-        id="credit_chart",
-        style={"height": "600px", "width": "100%"},
-        config={"responsive": True}
-    ),
-    
+    dcc.Graph(id="credit_chart", style={"height": "600px"}),
     html.Br(),
 
-    # Thresholds Section
-    html.H5("📉 Alert Thresholds"),
-    html.Div(id="threshold_cards"),
-    html.Br(),
-
-    # Summary Table
     html.H5("Latest Readings"),
     html.Div(id="summary_table"),
     html.Br(),
 
-    # Telegram Section
     dbc.Button("🚀 Send Telegram Summary", id="send_btn", color="success", className="me-2"),
     html.Span(id="status", className="text-info"),
     html.Br(),
 
-    # Auto-refresh
     dcc.Interval(
         id="weekly_refresh",
         interval=7 * 24 * 3600 * 1000,
@@ -242,20 +152,18 @@ app.layout = dbc.Container([
 
 
 # ============================================================
-# 7️⃣ Callbacks
+# 6️⃣ Callbacks
 # ============================================================
 @app.callback(
     Output("credit_chart", "figure"),
     Output("summary_table", "children"),
-    Output("threshold_cards", "children"),
     Input("weekly_refresh", "n_intervals"),
 )
 def update_dashboard(n_intervals):
     df = load_data()
     fig = make_chart(df)
     table = make_summary_table(df)
-    cards = make_threshold_cards(cfg)
-    return fig, table, cards
+    return fig, table
 
 
 @app.callback(
@@ -274,14 +182,14 @@ def send_summary(n_clicks):
         f"• HY Spread: {latest['HY Spread (bps)']:.0f} bps\n"
         f"• NFCI: {latest['NFCI Index']:.2f}\n"
         f"• Sentiment: {latest['Consumer Sentiment Index']:.2f}\n"
-        f"• VIX: {latest['VIX Index']:.2f}"
+        f"• VIX: {latest['VIX Index']:.2f}"  # 🟣 added
     )
     asyncio.run(notifier.send(msg))
     return f"✅ Telegram summary sent at {datetime.now().strftime('%H:%M:%S')}"
 
 
 # ============================================================
-# 8️⃣ Run
+# 7️⃣ Run
 # ============================================================
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=8050, debug=True)

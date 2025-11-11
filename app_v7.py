@@ -27,13 +27,7 @@ from credit_monitor_extended import (
 # ============================================================
 cfg = Config()
 notifier = TelegramNotifier(cfg.TELEGRAM_TOKEN, cfg.CHAT_ID)
-app = Dash(
-    __name__,
-    external_stylesheets=[dbc.themes.SANDSTONE],
-    meta_tags=[
-        {"name": "viewport", "content": "width=device-width, initial-scale=1, maximum-scale=1"}
-    ]
-)
+app = Dash(__name__, external_stylesheets=[dbc.themes.SANDSTONE])
 app.title = "U.S. Credit Market Dashboard"
 
 # ============================================================
@@ -64,7 +58,7 @@ def load_data():
 
 
 # ============================================================
-# 3️⃣ Chart Builder (Z-Score Normalization)
+# 3️⃣ Chart Builder (raw data)
 # ============================================================
 def make_chart(df):
     if df.empty:
@@ -76,71 +70,89 @@ def make_chart(df):
         )
         return fig
 
-    # --- Keep the 3 key indicators ---
-    df = df[["HY Spread (bps)", "VIX Index", "Consumer Sentiment Index"]].dropna()
-
-    # --- Normalize to Z-scores ---
-    df_norm = (df - df.mean()) / df.std()
-
-    # --- Compute z-score thresholds ---
-    thresh_values = {
-        "HY Spread (bps)": (cfg.HY_SPREAD_THRESHOLD - df["HY Spread (bps)"].mean()) / df["HY Spread (bps)"].std(),
-        "VIX Index": (cfg.VIX_THRESHOLD - df["VIX Index"].mean()) / df["VIX Index"].std(),
-        "Consumer Sentiment Index": (cfg.SENTIMENT_THRESHOLD - df["Consumer Sentiment Index"].mean()) / df["Consumer Sentiment Index"].std()
-    }
-
-    # --- Colors and friendly labels ---
-    series_info = {
-        "HY Spread (bps)": {"color": "red", "label": "HY Spread — Risk Premium"},
-        "VIX Index": {"color": "orange", "label": "VIX — Market Volatility"},
-        "Consumer Sentiment Index": {"color": "purple", "label": "Sentiment — Consumer Confidence"}
-    }
-
     fig = go.Figure()
 
-    # --- Solid main data lines ---
-    for col, info in series_info.items():
-        fig.add_trace(go.Scatter(
-            x=df_norm.index,
-            y=df_norm[col],
-            mode="lines",
-            name=info["label"],
-            line=dict(color=info["color"], width=2)
-        ))
+    # --- Add traces for all 5 indicators ---
+    fig.add_trace(go.Scatter(
+        x=df.index, y=df["Consumer Credit Growth (%)"],
+        name="Consumer Credit Growth (%)",
+        line=dict(color="blue", width=2), yaxis="y"
+    ))
+    fig.add_trace(go.Scatter(
+        x=df.index, y=df["HY Spread (bps)"],
+        name="HY Spread (bps)",
+        line=dict(color="red", width=2), yaxis="y2"
+    ))
+    fig.add_trace(go.Scatter(
+        x=df.index, y=df["NFCI Index"],
+        name="NFCI Index",
+        line=dict(color="green", width=2, dash="dash"), yaxis="y3"
+    ))
+    fig.add_trace(go.Scatter(
+        x=df.index, y=df["Consumer Sentiment Index"],
+        name="Consumer Sentiment Index",
+        line=dict(color="purple", width=2, dash="dot"), yaxis="y4"
+    ))
+    fig.add_trace(go.Scatter(
+        x=df.index, y=df["VIX Index"],
+        name="VIX Index",
+        line=dict(color="orange", width=2, dash="dot"), yaxis="y5"
+    ))
 
-    # --- Dashed threshold lines (semi-transparent) ---
-    for col, info in series_info.items():
-        z_thresh = thresh_values[col]
-        fig.add_hline(
-            y=z_thresh,
-            line_dash="dot",
-            line_color=info["color"],
-            opacity=0.6,  # 👈 soft opacity for cleaner visual hierarchy
-            annotation_text=f"{info['label']} threshold (z={z_thresh:.2f})",
-            annotation_position="top right",
-            annotation_font=dict(size=10, color=info["color"])
-        )
-
-    # --- Fixed vertical range ---
-    y_min = df_norm.min().min()
-    fig.update_yaxes(range=[y_min - 1, 8])
-
-    # --- Layout adjustments ---
+    # --- Layout with all positions ≤ 1.0 ---
     fig.update_layout(
-        title="Normalized U.S. Market Stress & Sentiment Indicators (Z-Scores)",
-        xaxis_title="Date",
-        yaxis_title="Standardized Value (Z-Score)",
+        title="U.S. Credit Market Indicators (Raw Values)",
+        xaxis=dict(title="Date"),
+
+        # Left axis
+        yaxis=dict(
+            title=dict(text="Consumer Credit Growth (%)", font=dict(color="blue")),
+            tickfont=dict(color="blue")
+        ),
+
+        # Right-side stacked axes (0.90 to 0.995)
+        yaxis2=dict(
+            title=dict(text="HY Spread (bps)", font=dict(color="red")),
+            tickfont=dict(color="red"),
+            overlaying="y", side="right", position=0.90
+        ),
+        yaxis3=dict(
+            title=dict(text="NFCI Index", font=dict(color="green")),
+            tickfont=dict(color="green"),
+            overlaying="y", side="right", position=0.94
+        ),
+        yaxis4=dict(
+            title=dict(text="Consumer Sentiment", font=dict(color="purple")),
+            tickfont=dict(color="purple"),
+            overlaying="y", side="right", position=0.97
+        ),
+        yaxis5=dict(
+            title=dict(text="VIX", font=dict(color="orange")),
+            tickfont=dict(color="orange"),
+            overlaying="y", side="right", position=0.995
+        ),
+
+        legend=dict(orientation="h", y=-0.25),
         template="plotly_white",
-        height=650,
-        legend=dict(
-            orientation="h",
-            y=-0.25,
-            font=dict(size=11)
-        )
+        height=650
     )
 
-    return fig
+    # --- Add threshold lines (within valid ranges) ---
+    try:
+        fig.add_hline(y=cfg.CREDIT_THRESHOLD, line_dash="dot", line_color="blue",
+                      annotation_text="Credit Thresh")
+        fig.add_hline(y=cfg.HY_SPREAD_THRESHOLD, line_dash="dot", line_color="red",
+                      annotation_text="HY Thresh")
+        fig.add_hline(y=cfg.NFCI_THRESHOLD, line_dash="dot", line_color="green",
+                      annotation_text="NFCI Thresh")
+        fig.add_hline(y=cfg.SENTIMENT_THRESHOLD, line_dash="dot", line_color="purple",
+                      annotation_text="Sentiment Thresh")
+        fig.add_hline(y=cfg.VIX_THRESHOLD, line_dash="dot", line_color="orange",
+                      annotation_text="VIX Thresh")
+    except Exception as e:
+        print(f"[Warning] Could not draw threshold lines: {e}")
 
+    return fig
 
 # ============================================================
 # 4️⃣ Threshold Display
@@ -163,8 +175,7 @@ def make_threshold_cards(cfg: Config):
                     html.P(v, className="card-text fw-bold text-danger mb-0")
                 ]),
                 className="text-center shadow-sm",
-                style={"minWidth": "12rem", "margin": "6px", "flex": "1"}
-
+                style={"width": "13rem", "margin": "6px"}
             )
         )
 
@@ -193,7 +204,7 @@ def make_summary_table(df: pd.DataFrame):
     return dash_table.DataTable(
         data=table_df.to_dict("records"),
         columns=[{"name": i, "id": i} for i in table_df.columns],
-        style_table={"overflowX": "auto", "width": "100%"},
+        style_table={"overflowX": "auto"},
         style_cell={"textAlign": "center", "padding": "6px"},
         style_header={"backgroundColor": "#f8f9fa", "fontWeight": "bold"},
         page_size=15
@@ -209,12 +220,7 @@ app.layout = dbc.Container([
            "Consumer Sentiment (UMCSENT), and VIX (VIXCLS)."),
 
     # Chart
-    dcc.Graph(
-        id="credit_chart",
-        style={"height": "600px", "width": "100%"},
-        config={"responsive": True}
-    ),
-    
+    dcc.Graph(id="credit_chart", style={"height": "600px"}),
     html.Br(),
 
     # Thresholds Section
@@ -263,6 +269,7 @@ def update_dashboard(n_intervals):
     Input("send_btn", "n_clicks"),
     prevent_initial_call=True
 )
+
 def send_summary(n_clicks):
     df = load_data()
     if df.empty:
