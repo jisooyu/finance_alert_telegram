@@ -30,9 +30,11 @@ notifier = TelegramNotifier(cfg.TELEGRAM_TOKEN, cfg.CHAT_ID)
 app = Dash(
     __name__,
     external_stylesheets=[dbc.themes.SANDSTONE],
-    meta_tags=[
-        {"name": "viewport", "content": "width=device-width, initial-scale=1, maximum-scale=1"}
-    ]
+    meta_tags=[{
+        "name": "viewport",
+        "content": "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
+    }]
+
 )
 app.title = "U.S. Credit Market Dashboard"
 
@@ -214,7 +216,7 @@ app.layout = dbc.Container([
         style={"height": "600px", "width": "100%"},
         config={"responsive": True}
     ),
-    
+
     html.Br(),
 
     # Thresholds Section
@@ -233,11 +235,18 @@ app.layout = dbc.Container([
     html.Br(),
 
     # Auto-refresh
+
     dcc.Interval(
-        id="weekly_refresh",
-        interval=7 * 24 * 3600 * 1000,
+        id="resize_check",
+        interval=2000,  # every 2 seconds to detect resize/orientation change
         n_intervals=0
-    )
+    ),
+    # dcc.Interval(
+    #     id="weekly_refresh",
+    #     interval=7 * 24 * 3600 * 1000,
+    #     n_intervals=0
+    # )
+
 ], fluid=True, className="p-4")
 
 
@@ -248,8 +257,10 @@ app.layout = dbc.Container([
     Output("credit_chart", "figure"),
     Output("summary_table", "children"),
     Output("threshold_cards", "children"),
-    Input("weekly_refresh", "n_intervals"),
+    Input("resize_check", "n_intervals"),
+    # Input("weekly_refresh", "n_intervals"),
 )
+
 def update_dashboard(n_intervals):
     df = load_data()
     fig = make_chart(df)
