@@ -1,12 +1,11 @@
 """
 credit_monitor_extended.py
 --------------------------------
-Monitor U.S. credit-market indicators:
+Monitor US credit-market indicators:
 - TOTALSLAR: Total Consumer Credit Growth (monthly)
 - BAMLH0A0HYM2: ICE BofA US High Yield OAS (daily)
 - NFCI: Chicago Fed National Financial Conditions Index (weekly)
-- UMCSENT: Univ. of Michigan Consumer Sentiment (monthly)
-- VIXCLS: CBOE Volatility Index (daily)
+
 Sends Telegram alerts when:
   1. New data is released, or
   2. Any metric breaches configured thresholds.
@@ -24,6 +23,7 @@ import html
 # ============================================================
 # 1️⃣ Configuration
 # ============================================================
+
 class Config:
     def __init__(self):
         load_dotenv()
@@ -32,29 +32,37 @@ class Config:
         if not self.TELEGRAM_TOKEN or not self.CHAT_ID:
             raise RuntimeError("Missing TELEGRAM_TOKEN or CHAT_ID in .env")
 
-        # FRED data series
+        # Data series
+        self.FRED_SERIES = {
+            "consumer_credit": "TOTALSLAR",
+            "hy_spread": "BAMLH0A0HYM2",
+            "nfci": "NFCI"
+        }
+
+        # Thresholds
+        self.CREDIT_THRESHOLD = 0.10       # % growth
+        self.HY_SPREAD_THRESHOLD = 400     # bps
+        self.NFCI_THRESHOLD = 0.0          # positive = tightening
+
+        # Data freshness window
+        self.STALE_DAYS = 90
+        self.START_DATE = "2010-01-01"
+
+        # the series code and threshold
         self.FRED_SERIES = {
             "consumer_credit": "TOTALSLAR",
             "hy_spread": "BAMLH0A0HYM2",
             "nfci": "NFCI",
-            "consumer_sentiment": "UMCSENT",
-            "vix": "VIXCLS"  # 🟣 added VIX
+            "consumer_sentiment": "UMCSENT"
         }
-
-        # Thresholds
-        self.CREDIT_THRESHOLD = 0.10
-        self.HY_SPREAD_THRESHOLD = 400
-        self.NFCI_THRESHOLD = 0.0
-        self.SENTIMENT_THRESHOLD = 60.0
-        self.VIX_THRESHOLD = 25.0  # 🟣 VIX alert level (above 25 often signals stress)
-
-        self.STALE_DAYS = 90
-        self.START_DATE = "2010-01-01"
+        # Example threshold
+        self.SENTIMENT_THRESHOLD = 60.0   # e.g., if sentiment drops below 60
 
 
 # ============================================================
 # 2️⃣ Data Fetchers
 # ============================================================
+
 class FredFetcher:
     """Unified FRED data fetcher."""
     def __init__(self, series_name: str):
@@ -88,32 +96,25 @@ def fetch_nfci(start='2000-01-01', end=None):
     df["latest_date"] = df.index
     return df
 
-
 def fetch_sentiment(start='2000-01-01', end=None):
     df = FredFetcher("UMCSENT").fetch(start, end)
     df.columns = ['consumer_sentiment']
     df["latest_date"] = df.index
     return df
 
-
-def fetch_vix(start='2000-01-01', end=None):
-    df = FredFetcher("VIXCLS").fetch(start, end)
-    df.columns = ['vix']
-    df["latest_date"] = df.index
-    return df
-
-
 # ============================================================
 # 3️⃣ Telegram Notifier
 # ============================================================
+
 class TelegramNotifier:
     def __init__(self, token: str, chat_id: str):
         self.bot = Bot(token=token)
         self.chat_id = chat_id
 
     async def send(self, message: str):
+        from datetime import datetime
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        safe_message = html.escape(message)
+        safe_message = html.escape(message)               # ✅ escape all <, >, &
         print(f"[{timestamp}] {message}")
         try:
             await self.bot.send_message(
@@ -124,10 +125,10 @@ class TelegramNotifier:
         except Exception as e:
             print(f"⚠️ Telegram send error: {e}")
 
-
 # ============================================================
 # 4️⃣ Credit Monitor Logic
 # ============================================================
+
 class CreditMonitor:
     def __init__(self, config: Config):
         self.cfg = config
@@ -138,6 +139,7 @@ class CreditMonitor:
         return (today - latest_date).days > self.cfg.STALE_DAYS
 
     def _compare_new_data(self, df: pd.DataFrame, cache_file: str) -> bool:
+        """Return True if the latest data date is new compared to cache file."""
         latest_date = df.index.max().date()
         os.makedirs("cache", exist_ok=True)
         path = os.path.join("cache", cache_file)
@@ -162,6 +164,7 @@ class CreditMonitor:
         cc_latest_value = cc.iloc[-1]['pct_change_consumer_credit']
         cc_stale = self._check_staleness(cc_latest_date)
         cc_new = self._compare_new_data(cc, "consumer_credit.txt")
+
         if cc_new:
             await self.notifier.send(f"🆕 New Consumer Credit data ({cc_latest_date}): {cc_latest_value:.2f}%")
         if cc_stale:
@@ -174,16 +177,18 @@ class CreditMonitor:
         hy_latest_date = hy.index.max().date()
         hy_latest_value = hy.iloc[-1]['hy_oas_bps']
         hy_new = self._compare_new_data(hy, "hy_spread.txt")
+
         if hy_new:
             await self.notifier.send(f"🆕 New HY Spread data ({hy_latest_date}): {hy_latest_value:.0f} bps")
         if hy_latest_value > self.cfg.HY_SPREAD_THRESHOLD:
             await self.notifier.send(f"🚨 HY Spread above {self.cfg.HY_SPREAD_THRESHOLD} bps: {hy_latest_value:.0f} bps")
 
-        # ---------- Financial Conditions ----------
+        # ---------- Financial Conditions (NFCI) ----------
         nfci = fetch_nfci(self.cfg.START_DATE)
         nfci_latest_date = nfci.index.max().date()
         nfci_latest_value = nfci.iloc[-1]['nfci']
         nfci_new = self._compare_new_data(nfci, "nfci.txt")
+
         if nfci_new:
             await self.notifier.send(f"🆕 New NFCI data ({nfci_latest_date}): {nfci_latest_value:.2f}")
         if nfci_latest_value > self.cfg.NFCI_THRESHOLD:
@@ -194,17 +199,17 @@ class CreditMonitor:
         sent_latest_date = sent.index.max().date()
         sent_latest_value = sent.iloc[-1]['consumer_sentiment']
         sent_new = self._compare_new_data(sent, "consumer_sentiment.txt")
+
         if sent_new:
             await self.notifier.send(f"🆕 New Consumer Sentiment data ({sent_latest_date}): {sent_latest_value:.2f}")
         if sent_latest_value < self.cfg.SENTIMENT_THRESHOLD:
-            await self.notifier.send(f"⚠️ Sentiment low: {sent_latest_value:.2f} (<{self.cfg.SENTIMENT_THRESHOLD})")
+            await self.notifier.send(f"⚠️ Consumer Sentiment Warning: {sent_latest_value:.2f} (<{self.cfg.SENTIMENT_THRESHOLD})")
 
-        # ---------- VIX Index ----------
-        vix = fetch_vix(self.cfg.START_DATE)
-        vix_latest_date = vix.index.max().date()
-        vix_latest_value = vix.iloc[-1]['vix']
-        vix_new = self._compare_new_data(vix, "vix.txt")
-        if vix_new:
-            await self.notifier.send(f"🆕 New VIX data ({vix_latest_date}): {vix_latest_value:.2f}")
-        if vix_latest_value > self.cfg.VIX_THRESHOLD:
-            await self.notifier.send(f"⚠️ VIX Warning: {vix_latest_value:.2f} (> {self.cfg.VIX_THRESHOLD})")
+# ============================================================
+# 5️⃣ Entry Point
+# ============================================================
+
+#if __name__ == "__main__":
+#    cfg = Config()
+#    monitor = CreditMonitor(cfg)
+#    asyncio.run(monitor.run())
