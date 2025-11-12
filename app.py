@@ -262,8 +262,9 @@ app.layout = dbc.Container([
     Output("credit_chart", "figure"),
     Output("summary_table", "children"),
     Output("threshold_cards", "children"),
-    Input("resize_check", "n_intervals"),
+    # Input("resize_check", "n_intervals"),
     # Input("weekly_refresh", "n_intervals"),
+    Input("hourly_refresh", "n_intervals"),
 )
 
 def update_dashboard(n_intervals):
