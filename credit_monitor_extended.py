@@ -13,7 +13,6 @@ Sends Telegram alerts when:
 """
 
 import os
-import asyncio
 from datetime import datetime, date
 import pandas as pd
 from pandas_datareader import data as web
